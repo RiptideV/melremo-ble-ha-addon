@@ -1,0 +1,4 @@
+bleak>=0.22
+paho-mqtt>=2.1
+PyYAML>=6.0
+aiohttp>=3.9

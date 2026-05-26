@@ -1,0 +1,5 @@
+#!/usr/bin/with-contenv bashio
+set -euo pipefail
+cd /app
+export PYTHONPATH=/app
+exec python3 -m melremo_bridge

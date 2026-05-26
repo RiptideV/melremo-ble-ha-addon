@@ -1,0 +1,68 @@
+name: MELRemo BLE Bridge
+slug: melremo_ble_bridge
+version: 0.1.0
+description: Expose Mitsubishi MELRemo BLE controllers as Home Assistant climate entities
+url: https://github.com/example/melremo-ble-ha-addon
+arch:
+  - aarch64
+  - amd64
+  - armv7
+init: false
+startup: services
+boot: auto
+hassio_api: true
+homeassistant_api: false
+host_dbus: true
+apparmor: false
+services:
+  - mqtt:need
+map:
+  - addon_config:rw
+options:
+  mqtt:
+    discovery_prefix: homeassistant
+    base_topic: melremo
+    host: ""
+    port: 1883
+    username: ""
+    password: ""
+  poll_interval: 60
+  command_timeout: 20
+  global_ble_concurrency: 1
+  publish_raw_diagnostics: false
+  log_level: info
+  units:
+    - id: office
+      name: Office AC
+      address: 00:11:22:33:44:55
+      pin: "0000"
+      defaults:
+        power: false
+        mode: cool
+        target_temp: 25.0
+        fan: auto
+        vane: 3
+schema:
+  mqtt:
+    discovery_prefix: str
+    base_topic: str
+    host: str?
+    port: port?
+    username: str?
+    password: password?
+  poll_interval: int(10,3600)
+  command_timeout: int(5,120)
+  global_ble_concurrency: int(1,4)
+  publish_raw_diagnostics: bool
+  log_level: list(trace|debug|info|warning|error|fatal)
+  units:
+    - id: match(^[a-zA-Z0-9_-]+$)
+      name: str
+      address: str
+      pin: match(^[0-9A-Fa-f]{4}$)
+      defaults:
+        power: bool?
+        mode: list(cool|heat|auto|dry|fan_only|off)?
+        target_temp: float(10,35)?
+        fan: list(auto|silent|low|middle|medium|high|high-power|rapid)?
+        vane: int(0,15)?
