@@ -2,7 +2,7 @@ name: MELRemo BLE Bridge
 slug: melremo_ble_bridge
 version: 0.1.0
 description: Expose Mitsubishi MELRemo BLE controllers as Home Assistant climate entities
-url: https://github.com/example/melremo-ble-ha-addon
+url: https://github.com/RiptideV/melremo-ble-ha-addon
 arch:
   - aarch64
   - amd64
