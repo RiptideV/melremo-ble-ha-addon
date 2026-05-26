@@ -18,4 +18,14 @@ Look for a MELRemo/Mitsubishi controller name such as `M/R_OFFICE`, then copy it
 
 The configured `units[].name` is the friendly Home Assistant climate/device name. It does **not** replace `units[].address`; BLE control should use the MAC address because friendly names may be duplicated, absent, or change over time.
 
-See [`melremo_ble_bridge/DOCS.md`](melremo_ble_bridge/DOCS.md) for full configuration and usage.
+Minimal add-on configuration:
+
+```yaml
+units:
+  - id: office
+    name: Office AC
+    address: AA:BB:CC:DD:EE:FF
+    pin: "0000"
+```
+
+All other settings are optional. Per-unit `defaults` are not exposed in the Supervisor schema; the add-on uses internal fallback values until it polls the controller. See [`melremo_ble_bridge/DOCS.md`](melremo_ble_bridge/DOCS.md) for full configuration and usage.

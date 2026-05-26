@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Removed `units[].defaults` from the Supervisor add-on schema/default options so minimal unit configs can be saved.
+- Runtime still uses internal fallback defaults until the first successful controller status poll.
+
 ## 0.1.0
 
 - Initial MELRemo BLE Bridge add-on skeleton.

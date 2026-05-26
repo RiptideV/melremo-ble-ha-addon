@@ -72,40 +72,62 @@ units:
     name: Office AC
     address: 00:11:22:33:44:55
     pin: "1234"
-    defaults:
-      power: false
-      mode: cool
-      target_temp: 25.0
-      fan: auto
-      vane: 3
   - id: bedroom
     name: Bedroom AC
     address: AA:BB:CC:DD:EE:FF
     pin: "5678"
-    defaults:
-      power: false
-      mode: cool
-      target_temp: 24.0
-      fan: middle
-      vane: 3
 ```
 
-### Options
+### Required settings
+
+At least one unit is required. For each unit, these fields are required:
 
 | Option | Description |
 |---|---|
-| `mqtt.discovery_prefix` | MQTT Discovery prefix, usually `homeassistant`. |
-| `mqtt.base_topic` | Base topic for commands and state, default `melremo`. |
-| `mqtt.host` / `port` / `username` / `password` | Optional explicit broker settings. Leave blank to use Supervisor MQTT service details. |
-| `poll_interval` | Seconds between status polls. |
-| `command_timeout` | BLE command timeout in seconds. |
-| `global_ble_concurrency` | Maximum simultaneous BLE sessions. Use `1` for best reliability. |
-| `publish_raw_diagnostics` | Publish retained raw status frames to MQTT diagnostics. Disabled by default to reduce data exposure. |
-| `units[].id` | Stable identifier used in MQTT topics and unique IDs. |
-| `units[].name` | Friendly climate entity/device name. |
+| `units[].id` | Stable identifier used in MQTT topics and unique IDs. Use letters, numbers, `_`, or `-`. |
+| `units[].name` | Friendly Home Assistant climate/device name. |
 | `units[].address` | BLE MAC address on Home Assistant/Linux, discovered with `bluetoothctl`. During development on macOS this may be a CoreBluetooth UUID. |
-| `units[].pin` | Four-digit/four-nibble MELRemo PIN for that controller. |
-| `units[].defaults` | Fallback state used before the first successful status poll. |
+| `units[].pin` | Four-digit/four-nibble MELRemo PIN for that controller. Quote it, e.g. `"1234"`. |
+
+Minimal configuration:
+
+```yaml
+units:
+  - id: office
+    name: Office AC
+    address: AA:BB:CC:DD:EE:FF
+    pin: "1234"
+```
+
+### Optional settings
+
+All other settings are optional and have defaults.
+
+| Option | Default | Description |
+|---|---:|---|
+| `mqtt.discovery_prefix` | `homeassistant` | MQTT Discovery prefix. |
+| `mqtt.base_topic` | `melremo` | Base topic for commands and state. |
+| `mqtt.host` | empty | Optional explicit broker host. Leave blank to use Supervisor MQTT service details. |
+| `mqtt.port` | `1883` | Optional explicit broker port. |
+| `mqtt.username` | empty | Optional explicit broker username. |
+| `mqtt.password` | empty | Optional explicit broker password. |
+| `poll_interval` | `60` | Seconds between status polls. |
+| `command_timeout` | `20` | BLE command timeout in seconds. |
+| `global_ble_concurrency` | `1` | Maximum simultaneous BLE sessions. Use `1` for best reliability. |
+| `publish_raw_diagnostics` | `false` | Publish retained raw status frames to MQTT diagnostics. Disabled by default to reduce data exposure. |
+| `log_level` | `info` | Add-on log level. |
+
+Internal fallback state before the first successful status poll:
+
+| Value | Default |
+|---|---:|
+| power | `false` |
+| mode | `cool` |
+| target temperature | `25.0` |
+| fan | `auto` |
+| vane | `3` |
+
+Note: `units[].defaults` is intentionally not exposed in the Supervisor add-on schema. Home Assistant Supervisor treats nested keys inside list items as required, which prevents saving a minimal unit config. The add-on runtime still uses the internal fallback values above until it polls the real controller status.
 
 ## MQTT entities
 

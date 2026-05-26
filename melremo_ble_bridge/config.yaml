@@ -1,6 +1,6 @@
 name: MELRemo BLE Bridge
 slug: melremo_ble_bridge
-version: 0.1.0
+version: 0.1.1
 description: Expose Mitsubishi MELRemo BLE controllers as Home Assistant climate entities
 url: https://github.com/RiptideV/melremo-ble-ha-addon
 arch:
@@ -36,12 +36,6 @@ options:
       name: Office AC
       address: 00:11:22:33:44:55
       pin: "0000"
-      defaults:
-        power: false
-        mode: cool
-        target_temp: 25.0
-        fan: auto
-        vane: 3
 schema:
   mqtt:
     discovery_prefix: str
@@ -60,9 +54,3 @@ schema:
       name: str
       address: str
       pin: match(^[0-9A-Fa-f]{4}$)
-      defaults:
-        power: bool?
-        mode: list(cool|heat|auto|dry|fan_only|off)?
-        target_temp: float(10,35)?
-        fan: list(auto|silent|low|middle|medium|high|high-power|rapid)?
-        vane: int(0,15)?
