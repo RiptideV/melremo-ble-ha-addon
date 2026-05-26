@@ -90,6 +90,8 @@ class UnitWorker:
         try:
             if command.type == "power":
                 status = await self.ble.apply(self.state, power=bool(command.value))
+            elif command.type == "mode":
+                status = await self.ble.apply(self.state, mode=str(command.value))
             elif command.type == "temperature":
                 status = await self.ble.apply(self.state, target_temp=float(command.value))
             elif command.type == "fan":

@@ -1,7 +1,7 @@
 """MELRemo/Gemini BLE protocol helpers.
 
-This module contains the reverse-engineered frame builders and parsers proven
-with MELRemo app 4.7.0 captures. Bit fields are LSB-first within each byte.
+This module contains MELRemo/Gemini BLE frame builders and parsers.
+Bit fields are LSB-first within each byte.
 """
 from __future__ import annotations
 
@@ -19,29 +19,40 @@ MELREMO_NOTIFY_CHAR = "ea1ea690-e795-11e6-bf01-fe55135034f3"
 
 FAN_NAME_TO_REQUEST_VALUE = {
     "auto": 4,
-    "silent": 0,
+    "quiet": 0,
     "low": 1,
-    "middle": 2,
     "medium": 2,
     "high": 3,
-    "high-power": 8,
-    "rapid": 9,
+    # Backwards-compatible aliases from earlier reverse engineering.
+    "silent": 0,
+    "middle": 2,
 }
 FAN_REQUEST_VALUE_TO_NAME = {
-    0: "silent",
+    0: "quiet",
     1: "low",
-    2: "middle",
+    2: "medium",
     3: "high",
     4: "auto",
-    8: "high-power",
-    9: "rapid",
 }
+SUPPORTED_FAN_MODES = ["auto", "high", "medium", "low", "quiet"]
+MIN_TEMP_C = 16.0
+MAX_TEMP_C = 31.0
+TEMP_STEP_C = 0.5
 
-# Only cool/off are exposed initially. Other values are kept as raw integers
-# until mode-setting/status captures are confirmed.
-MODE_VALUE_TO_NAME = {
+#   fan_only on: 0x01 -> power=1, unitmode=0
+#   cool on:     0x09 -> power=1, unitmode=1
+#   heat on:     0x11 -> power=1, unitmode=2
+#   dry on:      0x31 -> power=1, unitmode=6
+#   auto on:     0x79 -> power=1, unitmode=15
+UNITMODE_TO_HVAC_MODE = {
+    0: "fan_only",
     1: "cool",
+    2: "heat",
+    6: "dry",
+    15: "auto",
 }
+HVAC_MODE_TO_UNITMODE = {v: k for k, v in UNITMODE_TO_HVAC_MODE.items()}
+SUPPORTED_HVAC_MODES = ["off", "auto", "heat", "cool", "dry", "fan_only"]
 
 
 class ProtocolError(ValueError):
@@ -61,6 +72,7 @@ class Status:
     fan_value: int
     fan: str
     fan_raw_byte: int
+    room_temperature: Optional[float]
 
     @property
     def hvac_mode(self) -> str:
@@ -68,6 +80,10 @@ class Status:
 
     @property
     def target_temp(self) -> Optional[float]:
+        if self.mode == "heat":
+            return self.temps.get("heat")
+        if self.mode == "auto":
+            return self.temps.get("auto") or self.temps.get("cool")
         return self.temps.get("cool")
 
     def as_attributes(self, *, include_raw: bool = False) -> dict[str, object]:
@@ -78,6 +94,7 @@ class Status:
             "mode_value": self.mode_value,
             "fan_value": self.fan_value,
             "fan_raw_byte": self.fan_raw_byte,
+            "room_temperature": self.room_temperature,
             "temps": self.temps,
         }
         if include_raw:
@@ -156,6 +173,7 @@ def build_operation_payload(
     temp_c: Optional[float] = None,
     temp_slot: str = "cool",
     fan_speed: Optional[int] = None,
+    unitmode: Optional[int] = None,
     current_power: bool = True,
     current_mode: int = 1,
     current_temp_c: float = 25.0,
@@ -187,12 +205,13 @@ def build_operation_payload(
             temp_values[slot] = encoded
 
     effective_power = current_power if power is None else power
+    effective_mode = current_mode if unitmode is None else unitmode
     effective_fan = current_fan if fan_speed is None else fan_speed
 
     bw = BitWriter()
     # Update flags.
     bw.write(power is not None, 1)
-    bw.write(False, 1)  # unitmode_flag
+    bw.write(unitmode is not None, 1)  # unitmode_flag
     bw.write(0, 6)      # reserved01
     bw.write(temp_flags["cool"], 1)
     bw.write(temp_flags["heat"], 1)
@@ -211,7 +230,7 @@ def build_operation_payload(
 
     # Values.
     bw.write(1 if effective_power else 0, 3)
-    bw.write(current_mode, 5)
+    bw.write(effective_mode, 5)
     settemps = b"".join(temp_values[slot] for slot in temp_slots)
     for byte in settemps:
         bw.write(byte, 8)
@@ -306,6 +325,7 @@ def build_static_operation_frame(
     temp_c: Optional[float] = None,
     temp_slot: str = "cool",
     fan_speed: Optional[int] = None,
+    unitmode: Optional[int] = None,
     current_power: bool = True,
     current_mode: int = 1,
     current_temp_c: float = 25.0,
@@ -323,6 +343,7 @@ def build_static_operation_frame(
         temp_c=temp_c,
         temp_slot=temp_slot,
         fan_speed=fan_speed,
+        unitmode=unitmode,
         current_power=current_power,
         current_mode=current_mode,
         current_temp_c=current_temp_c,
@@ -368,6 +389,7 @@ def parse_status_frame(frame: bytes) -> Optional[Status]:
     mode_value = power_mode >> 3
     fan_vane = frame[40]
     fan_value = fan_vane >> 4
+    room_temperature = decode_melremo_temp(frame[47:49])
     power_raw = power_mode & 0x07
     return Status(
         raw=frame.hex(" "),
@@ -376,11 +398,12 @@ def parse_status_frame(frame: bytes) -> Optional[Status]:
         power=power_raw != 0,
         power_raw=power_raw,
         mode_value=mode_value,
-        mode=MODE_VALUE_TO_NAME.get(mode_value, f"mode_{mode_value}"),
+        mode=UNITMODE_TO_HVAC_MODE.get(mode_value, f"mode_{mode_value}"),
         temps=temps,
         fan_value=fan_value,
         fan=FAN_REQUEST_VALUE_TO_NAME.get(fan_value, f"unknown_{fan_value}"),
         fan_raw_byte=fan_vane,
+        room_temperature=room_temperature,
     )
 
 

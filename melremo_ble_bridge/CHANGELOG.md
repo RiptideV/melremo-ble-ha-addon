@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2
+
+- Assume command response as a successful operation response.
+- Poll status immediately after the operation success response is received.
+- Return as soon as a valid status frame is decoded instead of waiting out the full status timeout.
+- Decode room/current temperature from the status frame instead of mirroring the setpoint.
+- Use the device name as the primary climate entity name to avoid duplicated names like `Office AC Office AC`.
+
 ## 0.1.1
 
 - Removed `units[].defaults` from the Supervisor add-on schema/default options so minimal unit configs can be saved.

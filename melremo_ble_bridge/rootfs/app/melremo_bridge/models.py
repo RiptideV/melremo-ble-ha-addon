@@ -86,7 +86,7 @@ class UnitState:
         self.mode_value = status.mode_value
         if status.target_temp is not None:
             self.target_temp = status.target_temp
-        self.current_temperature = status.target_temp
+        self.current_temperature = status.room_temperature
         self.fan_value = status.fan_value
         self.fan = FAN_REQUEST_VALUE_TO_NAME.get(status.fan_value, status.fan)
         self.available = True

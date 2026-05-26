@@ -11,6 +11,7 @@ import aiohttp
 import paho.mqtt.client as mqtt
 
 from .models import AppConfig, Command, UnitConfig, UnitState
+from .protocol import MAX_TEMP_C, MIN_TEMP_C, SUPPORTED_FAN_MODES, SUPPORTED_HVAC_MODES, TEMP_STEP_C
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -90,9 +91,11 @@ class MqttBridge:
     def _discovery_payload(self, unit: UnitConfig) -> dict[str, object]:
         base = self.unit_topic(unit.id)
         return {
-            "name": unit.name,
+            # Main/primary entity uses the device name. Setting entity name to
+            # None avoids Home Assistant displaying "Office AC Office AC".
+            "name": None,
             "unique_id": f"melremo_{unit.id}_climate",
-            "object_id": f"melremo_{unit.id}",
+            "object_id": unit.id,
             "availability_topic": f"{base}/availability",
             "mode_command_topic": f"{base}/climate/mode/set",
             "mode_state_topic": f"{base}/climate/mode/state",
@@ -102,11 +105,11 @@ class MqttBridge:
             "fan_mode_state_topic": f"{base}/climate/fan_mode/state",
             "current_temperature_topic": f"{base}/climate/current_temperature/state",
             "json_attributes_topic": f"{base}/climate/attributes",
-            "modes": ["off", "cool"],
-            "fan_modes": ["auto", "silent", "low", "middle", "high", "high-power", "rapid"],
-            "min_temp": 16,
-            "max_temp": 31,
-            "temp_step": 0.5,
+            "modes": SUPPORTED_HVAC_MODES,
+            "fan_modes": SUPPORTED_FAN_MODES,
+            "min_temp": MIN_TEMP_C,
+            "max_temp": MAX_TEMP_C,
+            "temp_step": TEMP_STEP_C,
             "temperature_unit": "C",
             "device": {
                 "identifiers": [f"melremo_{unit.id}"],
@@ -161,18 +164,25 @@ class MqttBridge:
         unit_id, _, suffix = remainder.partition("/")
         if suffix == "climate/mode/set":
             value = payload.lower()
-            if value == "off":
-                return unit_id, Command("power", False)
-            if value == "cool":
-                return unit_id, Command("power", True)
-            raise MqttError(f"unsupported HVAC mode {payload!r}; currently supports off/cool")
+            if value == "fan only":
+                value = "fan_only"
+            if value not in SUPPORTED_HVAC_MODES:
+                raise MqttError(f"unsupported HVAC mode {payload!r}; supported: {', '.join(SUPPORTED_HVAC_MODES)}")
+            return unit_id, Command("mode", value)
         if suffix == "climate/target_temperature/set":
             temp = float(payload)
-            if not 16.0 <= temp <= 31.0:
-                raise MqttError(f"target temperature {temp} outside supported range 16.0..31.0C")
+            if not MIN_TEMP_C <= temp <= MAX_TEMP_C:
+                raise MqttError(f"target temperature {temp} outside supported range {MIN_TEMP_C}..{MAX_TEMP_C}C")
             return unit_id, Command("temperature", temp)
         if suffix == "climate/fan_mode/set":
-            return unit_id, Command("fan", payload.lower())
+            fan = payload.lower()
+            if fan == "middle":
+                fan = "medium"
+            if fan == "silent":
+                fan = "quiet"
+            if fan not in SUPPORTED_FAN_MODES:
+                raise MqttError(f"unsupported fan mode {payload!r}; supported: {', '.join(SUPPORTED_FAN_MODES)}")
+            return unit_id, Command("fan", fan)
         return None
 
     async def _resolve_broker(self) -> dict[str, object]:

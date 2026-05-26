@@ -10,6 +10,7 @@ from bleak import BleakClient
 from .models import UnitConfig, UnitState
 from .protocol import (
     FAN_NAME_TO_REQUEST_VALUE,
+    HVAC_MODE_TO_UNITMODE,
     MELREMO_NOTIFY_CHAR,
     MELREMO_WRITE_CHAR,
     Status,
@@ -22,6 +23,28 @@ from .protocol import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+OPERATION_SUCCESS_FRAME = bytes.fromhex("09 00 0b 05 00 01 01 00 00 1b 00")
+OPERATION_SUCCESS_BODY = OPERATION_SUCCESS_FRAME[3:-2]
+
+
+def is_operation_success_frame(frame: bytes) -> bool:
+    """Return true for operation-success responses with any sequence number.
+
+    Confirmed success example for request sequence 3:
+      09 00 0b 05 00 01 01 00 00 1b 00
+
+    Byte 2 contains response direction + sequence, so it varies with the
+    request sequence. The checksum varies accordingly.
+    """
+    return (
+        len(frame) == len(OPERATION_SUCCESS_FRAME)
+        and is_valid_melremo_frame(frame)
+        and frame[:2] == OPERATION_SUCCESS_FRAME[:2]
+        and (frame[2] & 0x08) == 0x08
+        and (frame[2] & 0xF0) == 0
+        and frame[3:-2] == OPERATION_SUCCESS_BODY
+    )
 
 
 class MelremoBleError(RuntimeError):
@@ -63,10 +86,11 @@ class MelremoBleClient:
         power: Optional[bool] = None,
         target_temp: Optional[float] = None,
         fan: Optional[str] = None,
+        mode: Optional[str] = None,
     ) -> Status:
         async with self.semaphore:
             return await asyncio.wait_for(
-                self._apply(state, power=power, target_temp=target_temp, fan=fan),
+                self._apply(state, power=power, target_temp=target_temp, fan=fan, mode=mode),
                 timeout=self.command_timeout,
             )
 
@@ -98,6 +122,7 @@ class MelremoBleClient:
         power: Optional[bool],
         target_temp: Optional[float],
         fan: Optional[str],
+        mode: Optional[str],
     ) -> Status:
         client, queue = await self._connect()
         try:
@@ -109,19 +134,32 @@ class MelremoBleClient:
             current_temp = context.target_temp if context and context.target_temp is not None else state.target_temp
             current_fan = context.fan_value if context else state.fan_value
 
+            requested_power = power
+            requested_unitmode: Optional[int] = None
+            if mode is not None:
+                if mode == "off":
+                    requested_power = False
+                else:
+                    if mode not in HVAC_MODE_TO_UNITMODE:
+                        raise MelremoBleError(f"unsupported HVAC mode: {mode}")
+                    requested_power = True
+                    requested_unitmode = HVAC_MODE_TO_UNITMODE[mode]
+
             fan_speed: Optional[int] = None
             if fan is not None:
-                fan_name = "middle" if fan == "medium" else fan
+                fan_name = "medium" if fan == "middle" else fan
+                fan_name = "quiet" if fan_name == "silent" else fan_name
                 if fan_name not in FAN_NAME_TO_REQUEST_VALUE:
                     raise MelremoBleError(f"unsupported fan mode: {fan}")
                 fan_speed = FAN_NAME_TO_REQUEST_VALUE[fan_name]
 
             operation = build_static_operation_frame(
                 seq_no=4,
-                power=power,
+                power=requested_power,
                 temp_c=target_temp,
-                temp_slot="cool",
+                temp_slot=self._temp_slot_for_mode(context.mode if context else state.mode),
                 fan_speed=fan_speed,
+                unitmode=requested_unitmode,
                 current_power=current_power,
                 current_mode=current_mode,
                 current_temp_c=current_temp,
@@ -129,12 +167,18 @@ class MelremoBleClient:
                 current_vane=state.vane,
             )
             await self._write_frame(client, operation)
-            # Operation ACK is a short frame. It is useful for diagnostics but
-            # status polling below is the authoritative state refresh.
-            await self._collect_frames(queue, timeout=1.5)
+            await self._wait_for_operation_success(queue, timeout=3.0)
             return await self._request_status(client, queue, seq_no=5)
         finally:
             await self._safe_disconnect(client)
+
+    @staticmethod
+    def _temp_slot_for_mode(mode: str) -> str:
+        if mode == "heat":
+            return "heat"
+        if mode == "auto":
+            return "auto"
+        return "cool"
 
     async def _login(self, client: BleakClient, queue: asyncio.Queue[bytes]) -> None:
         for frame in build_static_login_frames(self.unit.pin, seq_no=0):
@@ -153,14 +197,7 @@ class MelremoBleClient:
     async def _request_status(self, client: BleakClient, queue: asyncio.Queue[bytes], *, seq_no: int) -> Status:
         self._drain_queue(queue)
         await self._write_frame(client, build_static_status_request_frame(seq_no=seq_no))
-        frames = await self._collect_frames(queue, timeout=3.0)
-        for frame in frames:
-            status = parse_status_frame(frame)
-            if status is not None:
-                return status
-        raise MelremoBleError(
-            f"no decodable status response from {self.unit.id}; received {len(frames)} frame(s)"
-        )
+        return await self._wait_for_status(queue, timeout=3.0)
 
     async def _write_frame(self, client: BleakClient, frame: bytes) -> None:
         # Do not log raw write frames: login frames contain the controller PIN
@@ -171,8 +208,34 @@ class MelremoBleClient:
             if self.chunk_delay:
                 await asyncio.sleep(self.chunk_delay)
 
-    async def _collect_frames(self, queue: asyncio.Queue[bytes], timeout: float) -> list[bytes]:
-        frames: list[bytes] = []
+    async def _wait_for_operation_success(self, queue: asyncio.Queue[bytes], timeout: float) -> None:
+        frames_seen = 0
+        async for frame in self._iter_notification_frames(queue, timeout):
+            frames_seen += 1
+            if is_operation_success_frame(frame):
+                _LOGGER.debug("%s operation success response received", self.unit.id)
+                return
+            _LOGGER.debug("%s ignoring non-success operation response len=%d", self.unit.id, len(frame))
+        raise MelremoBleError(
+            f"operation success response not received from {self.unit.id}; received {frames_seen} frame(s)"
+        )
+
+    async def _wait_for_status(self, queue: asyncio.Queue[bytes], timeout: float) -> Status:
+        frames_seen = 0
+        async for frame in self._iter_notification_frames(queue, timeout):
+            frames_seen += 1
+            status = parse_status_frame(frame)
+            if status is not None:
+                return status
+            if is_operation_success_frame(frame):
+                _LOGGER.debug("%s ignoring operation success while waiting for status", self.unit.id)
+            else:
+                _LOGGER.debug("%s ignoring non-status response len=%d", self.unit.id, len(frame))
+        raise MelremoBleError(
+            f"no decodable status response from {self.unit.id}; received {frames_seen} frame(s)"
+        )
+
+    async def _iter_notification_frames(self, queue: asyncio.Queue[bytes], timeout: float):
         buf = bytearray()
         expected: Optional[int] = None
         deadline = asyncio.get_running_loop().time() + timeout
@@ -191,10 +254,10 @@ class MelremoBleClient:
                     continue
                 expected = int.from_bytes(data[:2], "little") + 2
             buf.extend(data)
-            if expected is not None and len(buf) >= expected:
+            while expected is not None and len(buf) >= expected:
                 frame = bytes(buf[:expected])
                 if is_valid_melremo_frame(frame):
-                    frames.append(frame)
+                    yield frame
                 else:
                     _LOGGER.warning("%s invalid notification frame len=%d", self.unit.id, len(frame))
                 extra = buf[expected:]
@@ -202,7 +265,6 @@ class MelremoBleClient:
                 expected = int.from_bytes(buf[:2], "little") + 2 if len(buf) >= 2 else None
         if buf:
             _LOGGER.debug("%s leftover partial notification len=%d", self.unit.id, len(buf))
-        return frames
 
     @staticmethod
     def _drain_queue(queue: asyncio.Queue[bytes]) -> None:

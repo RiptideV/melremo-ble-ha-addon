@@ -152,24 +152,40 @@ melremo/<unit_id>/availability
 
 ## Supported commands
 
-Initial version supports:
+Supported HVAC modes match the core user-facing modes:
 
-- HVAC mode `off`
-- HVAC mode `cool` (implemented as power on while preserving current mode value)
+- `off`
+- `auto`
+- `heat`
+- `cool`
+- `dry`
+- `fan_only` / Fan
+
+Mode commands use the MELRemo operation-byte mapping:
+
+```text
+off      -> power=false, keep current unitmode
+fan_only -> power=true,  unitmode=0  byte 0x01
+cool     -> power=true,  unitmode=1  byte 0x09
+heat     -> power=true,  unitmode=2  byte 0x11
+dry      -> power=true,  unitmode=6  byte 0x31
+auto     -> power=true,  unitmode=15 byte 0x79
+```
+
+Other supported commands:
+
 - target temperature in Celsius, 16.0–31.0°C range enforced, 0.5°C step expected
 - fan modes:
   - `auto`
-  - `silent`
-  - `low`
-  - `middle`
   - `high`
-  - `high-power`
-  - `rapid`
+  - `medium`
+  - `low`
+  - `quiet`
 
 ## Known limitations
 
-- Only `off` and `cool` are exposed as Home Assistant HVAC modes until additional MELRemo mode mappings are captured and verified.
-- Current room temperature is not separately decoded yet; the add-on publishes the decoded target/set temperature as `current_temperature` for now.
+- Vane/swing is intentionally not exposed yet.
+- Current room temperature is decoded from the status frame and published as `current_temperature`.
 - BLE access inside Home Assistant containers can depend on host Bluetooth/BlueZ and DBus permissions. This add-on uses `host_dbus: true` and disables AppArmor initially for compatibility. Disabling AppArmor increases container privileges; replace it with a tighter profile when BLE permissions are fully characterized.
 - Long-lived authenticated sessions are not assumed. The add-on reconnects and sends the login prelude for each status/command sequence.
 

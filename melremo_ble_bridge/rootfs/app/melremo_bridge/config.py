@@ -27,8 +27,10 @@ def _require_unit_id(value: str) -> str:
 def _defaults_from_dict(data: dict[str, Any] | None) -> UnitDefaults:
     data = data or {}
     fan = str(data.get("fan", "auto"))
-    if fan == "medium":
-        fan = "middle"
+    if fan == "middle":
+        fan = "medium"
+    if fan == "silent":
+        fan = "quiet"
     if fan not in FAN_NAME_TO_REQUEST_VALUE:
         raise ConfigError(f"unsupported fan default: {fan}")
     return UnitDefaults(
